@@ -3,6 +3,7 @@ from freqtrade.strategy import IStrategy, IntParameter, DecimalParameter
 from pandas import DataFrame
 import talib.abstract as ta
 from datetime import datetime
+import numpy as np
 
 
 class RangeFilterStrategyV3(IStrategy):
@@ -25,7 +26,7 @@ class RangeFilterStrategyV3(IStrategy):
     process_only_new_candles = True
 
     # Number of candles the strategy requires before producing valid signals
-    startup_candle_count = 100
+    startup_candle_count = 110
 
     # Enable shorting
     can_short = True
@@ -41,10 +42,15 @@ class RangeFilterStrategyV3(IStrategy):
 
     # Optional order type mapping
     order_types = {
-        'entry': 'market',
-        'exit': 'market',
-        'stoploss': 'market',
-        'stoploss_on_exchange': False
+        "entry": "limit",
+        "exit": "limit",
+        "emergency_exit": "market",
+        "force_entry": "market",
+        "force_exit": "market",
+        "stoploss": "market",
+        "stoploss_on_exchange": False,
+        "stoploss_on_exchange_interval": 60,
+        "stoploss_on_exchange_limit_ratio": 0.99,
     }
 
     def rng_size(self, dataframe: DataFrame, qty, n):
@@ -76,7 +82,6 @@ class RangeFilterStrategyV3(IStrategy):
         return filt
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-
         # Calculate range size and filter values
         dataframe["range_size"] = self.rng_size(dataframe, self.rng_qty, self.rng_per)
         dataframe["filter"] = self.rng_filt(

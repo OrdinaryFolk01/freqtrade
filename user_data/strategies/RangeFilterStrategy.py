@@ -9,19 +9,19 @@ import pandas as pd  # 添加 pandas 库
 
 class RangeFilterStrategyV3(IStrategy):
     # 使用 Freqtrade 的参数优化功能
-    rng_per = IntParameter(10, 100, default=55, space="optimize")
-    rng_qty = DecimalParameter(1.0, 10.0, default=4.5, space="optimize")
+    rng_per = IntParameter(10, 100, default=20, space="optimize")
+    rng_qty = DecimalParameter(1.0, 10.0, default=3.5, space="optimize")
 
     # Minimal ROI designed for the strategy.
-    minimal_roi = {"0": 99}  # 设置为 10% 的收益目标
+    minimal_roi = {"0": 10}  # 设置为 10% 的收益目标
 
     # Stoploss:
-    stoploss = -0.6  # 将止损设置为 -5%
+    stoploss = -0.5  # 将止损设置为 -5%
 
     # Trailing stoploss
-    trailing_stop = False  # 启用跟踪止损
+    trailing_stop = True
     trailing_stop_positive = 0.1
-    trailing_stop_positive_offset = 0.11
+    trailing_stop_positive_offset = 0.3
     trailing_only_offset_is_reached = True
 
     # Optimal timeframe for the strategy
@@ -31,14 +31,14 @@ class RangeFilterStrategyV3(IStrategy):
     process_only_new_candles = True
 
     # Number of candles the strategy requires before producing valid signals
-    startup_candle_count = 110
+    startup_candle_count = 40
 
     # Enable shorting
     can_short = True
 
     # Experimental settings (configuration will overide these if set)
     use_exit_signal = True
-    exit_profit_only = True
+    exit_profit_only = False
     ignore_roi_if_entry_signal = False
 
     # Optional order type mapping
@@ -141,13 +141,21 @@ class RangeFilterStrategyV3(IStrategy):
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         # 多头平仓条件
         dataframe.loc[
-            ((dataframe["close"] < dataframe["filter"]) & (dataframe["downward"] > 0)),
+            (
+                (dataframe["close"] < dataframe["filter"])
+                & (dataframe["downward"] > 0)
+                & (dataframe["CondIni"].shift(1) != -1)
+            ),
             ["exit_long", "exit_tag"],
         ] = (1, "平多")
 
         # 空头平仓条件
         dataframe.loc[
-            ((dataframe["close"] > dataframe["filter"]) & (dataframe["upward"] > 0)),
+            (
+                (dataframe["close"] > dataframe["filter"])
+                & (dataframe["upward"] > 0)
+                & (dataframe["CondIni"].shift(1) != 1)
+            ),
             ["exit_short", "exit_tag"],
         ] = (1, "平空")
 

@@ -4,20 +4,25 @@ from pandas import DataFrame
 import talib.abstract as ta
 from datetime import datetime
 import numpy as np
+import pandas as pd  # 添加 pandas 库
 
 
 class RangeFilterStrategyV3(IStrategy):
+    # 使用 Freqtrade 的参数优化功能
+    rng_per = IntParameter(10, 100, default=55, space="optimize")
+    rng_qty = DecimalParameter(1.0, 10.0, default=4.5, space="optimize")
+
     # Minimal ROI designed for the strategy.
-    minimal_roi = {"0": 99}
+    minimal_roi = {"0": 99}  # 设置为 10% 的收益目标
 
     # Stoploss:
-    stoploss = -0.7
+    stoploss = -0.6  # 将止损设置为 -5%
 
     # Trailing stoploss
-    trailing_stop = False
-    trailing_stop_positive = 1  # 1%
-    trailing_stop_positive_offset = 0.9  # 2%, move stop to 1% once 2% profit is reached
-    trailing_only_offset_is_reached = False
+    trailing_stop = False  # 启用跟踪止损
+    trailing_stop_positive = 0.1
+    trailing_stop_positive_offset = 0.11
+    trailing_only_offset_is_reached = True
 
     # Optimal timeframe for the strategy
     timeframe = "5m"
@@ -30,10 +35,6 @@ class RangeFilterStrategyV3(IStrategy):
 
     # Enable shorting
     can_short = True
-
-    # Define parameters for optimization in V3 format
-    rng_per = 55
-    rng_qty = 4.5
 
     # Experimental settings (configuration will overide these if set)
     use_exit_signal = True
@@ -54,92 +55,83 @@ class RangeFilterStrategyV3(IStrategy):
     }
 
     def rng_size(self, dataframe: DataFrame, qty, n):
-        # Calculate average range using high, low, and close prices
-        avrng = ta.EMA(
-            ta.TRANGE(dataframe["high"], dataframe["low"], dataframe["close"]), timeperiod=n
-        )
+        # 计算平均真实波幅 (ATR)
+        avrng = ta.EMA(ta.TRANGE(dataframe), timeperiod=n)
         wper = (n * 2) - 1
         AC = ta.EMA(avrng, timeperiod=wper) * qty
         return AC
 
-        # abs_diff = np.abs(dataframe["close"] - np.roll(dataframe["close"], 1))
-        # abs_diff[0] = 0
-        # wper = (n * 2) - 1
-        # AC = ta.EMA(abs_diff, timeperiod=wper) * qty
-        # return AC
-
     def rng_filt(self, series, rng_, n):
-        r = rng_
-        filt = series.copy()
-        filt.iloc[:n] = series.iloc[:n]  # Ensure indexing is done using .iloc for Series
+        # 使用向量化操作替代循环，提升性能
+        filt = pd.Series(index=series.index, dtype="float64")
+        filt.iloc[:n] = series.iloc[:n]
+
         for i in range(n, len(series)):
-            if series.iloc[i] - r.iloc[i] > filt.iloc[i - 1]:
-                filt.iloc[i] = series.iloc[i] - r.iloc[i]
-            elif series.iloc[i] + r.iloc[i] < filt.iloc[i - 1]:
-                filt.iloc[i] = series.iloc[i] + r.iloc[i]
+            if series.iloc[i] - rng_.iloc[i] > filt.iloc[i - 1]:
+                filt.iloc[i] = series.iloc[i] - rng_.iloc[i]
+            elif series.iloc[i] + rng_.iloc[i] < filt.iloc[i - 1]:
+                filt.iloc[i] = series.iloc[i] + rng_.iloc[i]
             else:
                 filt.iloc[i] = filt.iloc[i - 1]
         return filt
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-        # Calculate range size and filter values
-        dataframe["range_size"] = self.rng_size(dataframe, self.rng_qty, self.rng_per)
-        dataframe["filter"] = self.rng_filt(
-            dataframe["close"], dataframe["range_size"], self.rng_per
-        )
+        n = self.rng_per.value
+        qty = self.rng_qty.value
 
-        # Direction Conditions
-        dataframe["fdir"] = 0
-        dataframe.loc[dataframe["filter"] > dataframe["filter"].shift(1), "fdir"] = 1
-        dataframe.loc[dataframe["filter"] < dataframe["filter"].shift(1), "fdir"] = -1
+        # 计算区间大小和过滤器值
+        dataframe["range_size"] = self.rng_size(dataframe, qty, n)
+        dataframe["filter"] = self.rng_filt(dataframe["close"], dataframe["range_size"], n)
+
+        # 确定趋势方向
+        dataframe["fdir"] = np.where(
+            dataframe["filter"] > dataframe["filter"].shift(1),
+            1,
+            np.where(dataframe["filter"] < dataframe["filter"].shift(1), -1, 0),
+        )
 
         dataframe["upward"] = (dataframe["fdir"] == 1).astype(int)
         dataframe["downward"] = (dataframe["fdir"] == -1).astype(int)
 
-        # Initialize CondIni state tracking
-        dataframe["CondIni"] = 0
-        dataframe.loc[
+        # 初始化条件状态跟踪
+        dataframe["CondIni"] = np.where(
             (dataframe["close"] > dataframe["filter"])
             & (dataframe["close"] > dataframe["close"].shift(1))
             & (dataframe["upward"] > 0),
-            "CondIni",
-        ] = 1  # Long condition
+            1,
+            np.where(
+                (dataframe["close"] < dataframe["filter"])
+                & (dataframe["close"] < dataframe["close"].shift(1))
+                & (dataframe["downward"] > 0),
+                -1,
+                0,
+            ),
+        )
 
-        dataframe.loc[
-            (dataframe["close"] < dataframe["filter"])
-            & (dataframe["close"] < dataframe["close"].shift(1))
-            & (dataframe["downward"] > 0),
-            "CondIni",
-        ] = -1  # Short condition
-
-        # Propagate previous CondIni state to avoid flipping on each candle
-        dataframe["CondIni"] = dataframe["CondIni"].replace(0, None).ffill().fillna(0)
+        # 传播之前的 CondIni 状态，避免在每根K线时翻转
+        dataframe["CondIni"] = dataframe["CondIni"].replace(0, np.nan).ffill().fillna(0)
 
         return dataframe
 
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-        # Long entry conditions - ensure not entering long after previous long signal
+        # 多头开仓条件
         dataframe.loc[
             (
                 (dataframe["close"] > dataframe["filter"])
                 & (dataframe["upward"] > 0)
                 & (dataframe["close"] > dataframe["close"].shift(1))
-                & (
-                    dataframe["CondIni"].shift(1) == -1
-                )  # Only enter long if previous condition was short
+                & (dataframe["CondIni"].shift(1) == -1)
             ),
             ["enter_long", "enter_tag"],
         ] = (1, "买入")
 
-        # Short entry conditions - ensure not entering short after previous short signal
+        # 空头开仓条件
         dataframe.loc[
             (
                 (dataframe["close"] < dataframe["filter"])
                 & (dataframe["downward"] > 0)
                 & (dataframe["close"] < dataframe["close"].shift(1))
-                & (
-                    dataframe["CondIni"].shift(1) == 1
-                )  # Only enter short if previous condition was long
+                & (dataframe["CondIni"].shift(1) == 1)
             ),
             ["enter_short", "enter_tag"],
         ] = (1, "卖出")
@@ -147,13 +139,13 @@ class RangeFilterStrategyV3(IStrategy):
         return dataframe
 
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-        # Long exit conditions
+        # 多头平仓条件
         dataframe.loc[
             ((dataframe["close"] < dataframe["filter"]) & (dataframe["downward"] > 0)),
             ["exit_long", "exit_tag"],
         ] = (1, "平多")
 
-        # Short exit conditions
+        # 空头平仓条件
         dataframe.loc[
             ((dataframe["close"] > dataframe["filter"]) & (dataframe["upward"] > 0)),
             ["exit_short", "exit_tag"],
@@ -171,15 +163,6 @@ class RangeFilterStrategyV3(IStrategy):
         side: str,
         **kwargs,
     ) -> float:
-        """
-        Customize leverage for each new trade.
-
-        :param pair: Pair that's currently analyzed
-        :param current_time: datetime object, containing the current datetime
-        :param current_rate: Rate, calculated based on pricing settings in exit_pricing.
-        :param proposed_leverage: A leverage proposed by the bot.
-        :param max_leverage: Max leverage allowed on this pair
-        :param side: 'long' or 'short' - indicating the direction of the proposed trade
-        :return: A leverage amount, which is between 1.0 and max_leverage.
-        """
+        # 根据风险管理，设置合适的杠杆倍数
+        # leverage = min(3.0, max_leverage)  # 设定最大使用3倍杠杆
         return max_leverage

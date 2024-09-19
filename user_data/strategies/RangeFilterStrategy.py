@@ -10,7 +10,7 @@ import pandas as pd  # 添加 pandas 库
 class RangeFilterStrategyV3(IStrategy):
     # 使用 Freqtrade 的参数优化功能
     rng_per = IntParameter(10, 100, default=20, space="optimize")
-    rng_qty = DecimalParameter(1.0, 10.0, default=3.5, space="optimize")
+    rng_qty = DecimalParameter(1.0, 10.0, default=4.5, space="optimize")
 
     # Minimal ROI designed for the strategy.
     minimal_roi = {"0": 10}  # 设置为 10% 的收益目标
@@ -19,8 +19,8 @@ class RangeFilterStrategyV3(IStrategy):
     stoploss = -0.5  # 将止损设置为 -5%
 
     # Trailing stoploss
-    trailing_stop = True
-    trailing_stop_positive = 0.1
+    trailing_stop = False
+    trailing_stop_positive = 0.2
     trailing_stop_positive_offset = 0.3
     trailing_only_offset_is_reached = True
 

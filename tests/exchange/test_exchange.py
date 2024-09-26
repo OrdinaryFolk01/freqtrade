@@ -2084,24 +2084,29 @@ def test___now_is_time_to_refresh(default_conf, mocker, exchange_name, time_mach
     assert exchange._now_is_time_to_refresh(pair, "5m", candle_type) is True
 
 
-@pytest.mark.parametrize("exchange_name", EXCHANGES)
 @pytest.mark.parametrize("candle_type", ["mark", ""])
+@pytest.mark.parametrize("exchange_name", EXCHANGES)
 def test_get_historic_ohlcv(default_conf, mocker, caplog, exchange_name, candle_type):
     exchange = get_patched_exchange(mocker, default_conf, exchange=exchange_name)
-    ohlcv = [
-        [
-            dt_ts(),  # unix timestamp ms
-            1,  # open
-            2,  # high
-            3,  # low
-            4,  # close
-            5,  # volume (in quote currency)
-        ]
-    ]
     pair = "ETH/BTC"
+    calls = 0
+    now = dt_now()
 
     async def mock_candle_hist(pair, timeframe, candle_type, since_ms):
-        return pair, timeframe, candle_type, ohlcv, True
+        nonlocal calls
+        calls += 1
+        ohlcv = [
+            [
+                dt_ts(now + timedelta(minutes=5 * (calls + i))),  # unix timestamp ms
+                1,  # open
+                2,  # high
+                3,  # low
+                4,  # close
+                5,  # volume (in quote currency)
+            ]
+            for i in range(2)
+        ]
+        return (pair, timeframe, candle_type, ohlcv, True)
 
     exchange._async_get_candle_history = Mock(wraps=mock_candle_hist)
     # one_call calculation * 1.8 should do 2 calls
@@ -2112,7 +2117,7 @@ def test_get_historic_ohlcv(default_conf, mocker, caplog, exchange_name, candle_
     )
 
     assert exchange._async_get_candle_history.call_count == 2
-    # Returns twice the above OHLCV data
+    # Returns twice the above OHLCV data after truncating the open candle.
     assert len(ret) == 2
     assert log_has_re(r"Downloaded data for .* with length .*\.", caplog)
 
@@ -3564,7 +3569,7 @@ def test_cancel_order_with_result(
     mocker.patch(f"{EXMS}.exchange_has", return_value=True)
     api_mock = MagicMock()
     api_mock.cancel_order = MagicMock(return_value=corder)
-    api_mock.fetch_order = MagicMock(return_value={})
+    api_mock.fetch_order = MagicMock(return_value={"id": "1234"})
     exchange = get_patched_exchange(mocker, default_conf, api_mock, exchange=exchange_name)
     res = exchange.cancel_order_with_result("1234", "ETH/BTC", 1234)
     assert isinstance(res, dict)

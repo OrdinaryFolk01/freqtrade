@@ -20,8 +20,8 @@ class RangeFilterStrategyV3(IStrategy):
 
     # Trailing stoploss
     trailing_stop = False
-    trailing_stop_positive = 0.2
-    trailing_stop_positive_offset = 0.3
+    trailing_stop_positive = 0.5
+    trailing_stop_positive_offset = 1
     trailing_only_offset_is_reached = True
 
     # Optimal timeframe for the strategy
@@ -174,3 +174,4 @@ class RangeFilterStrategyV3(IStrategy):
         # 根据风险管理，设置合适的杠杆倍数
         # leverage = min(3.0, max_leverage)  # 设定最大使用3倍杠杆
         return max_leverage
+        # return 10.0

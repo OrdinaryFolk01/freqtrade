@@ -12,6 +12,8 @@ class TwoBullishCandlesFixedStopStrategy(IStrategy):
 
     # 策略参数
     timeframe = "1d"
+    INTERFACE_VERSION = 3  # 确保使用V3版本接口
+    startup_candle_count = 2
     process_only_new_candles = True
 
     # 最小回报率
@@ -29,6 +31,15 @@ class TwoBullishCandlesFixedStopStrategy(IStrategy):
             "prev_bullish_low": {"color": "green"},
             "prev_bearish_high": {"color": "red"},
         }
+    }
+    
+    order_types= {
+        'entry': 'limit', 
+        'exit': 'limit', 
+        'stoploss': 'market', 
+        'stoploss_on_exchange': False, 
+        'stoploss_on_exchange_interval': 60, 
+        'emergency_exit': 'market'
     }
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
@@ -79,7 +90,6 @@ class TwoBullishCandlesFixedStopStrategy(IStrategy):
         current_rate: float,
         proposed_leverage: float,
         max_leverage: float,
-        side: str,
         **kwargs,
     ) -> float:
         # 根据风险管理，设置合适的杠杆倍数
@@ -112,3 +122,5 @@ class TwoBullishCandlesFixedStopStrategy(IStrategy):
             # 获取最新的 prev_bearish_high 值
             prev_bearish_high = dataframe["prev_bearish_high"].iat[-1]
             return prev_bearish_high
+        
+        return proposed_rate

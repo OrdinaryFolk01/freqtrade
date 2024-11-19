@@ -459,15 +459,18 @@ class Exchange:
         Exchange ohlcv candle limit
         Uses ohlcv_candle_limit_per_timeframe if the exchange has different limits
         per timeframe (e.g. bittrex), otherwise falls back to ohlcv_candle_limit
-        TODO: this is most likely no longer needed since only bittrex needed this.
         :param timeframe: Timeframe to check
         :param candle_type: Candle-type
         :param since_ms: Starting timestamp
         :return: Candle limit as integer
         """
+
+        fallback_val = self._ft_has.get("ohlcv_candle_limit")
+        if candle_type == CandleType.FUNDING_RATE:
+            fallback_val = self._ft_has.get("funding_fee_candle_limit", fallback_val)
         return int(
             self._ft_has.get("ohlcv_candle_limit_per_timeframe", {}).get(
-                timeframe, str(self._ft_has.get("ohlcv_candle_limit"))
+                timeframe, str(fallback_val)
             )
         )
 
@@ -2886,6 +2889,14 @@ class Exchange:
         else:
             return trades[-1].get("timestamp")
 
+    async def _async_get_trade_history_id_startup(
+        self, pair: str, since: int | None
+    ) -> tuple[list[list], str]:
+        """
+        override for initial trade_history_id call
+        """
+        return await self._async_fetch_trades(pair, since=since)
+
     async def _async_get_trade_history_id(
         self, pair: str, until: int, since: int | None = None, from_id: str | None = None
     ) -> tuple[str, list[list]]:
@@ -2912,7 +2923,7 @@ class Exchange:
             # of up to an hour.
             # e.g. Binance returns the "last 1000" candles within a 1h time interval
             # - so we will miss the first trades.
-            t, from_id = await self._async_fetch_trades(pair, since=since)
+            t, from_id = await self._async_get_trade_history_id_startup(pair, since=since)
             trades.extend(t[x])
         while True:
             try:
